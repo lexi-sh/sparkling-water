@@ -1,28 +1,34 @@
 import org.apache.spark.sql.types.*
 
 case class SchemaConverter(lineage: String = "", existingCaseClasses: Set[CaseClassString] = Set()):
-  def generate(name: String, schema: StructType): Set[CaseClassString] =
+  def generate(schema: StructType): Set[CaseClassString] =
     val fieldResponses = schema.fields.map(convertToScalaType)
 
     val fields = fieldResponses.mkString(sep, s",$sep", sep)
-    val thisCaseClass = s"case class $name($fields)"
+    val thisCaseClass = s"case class $lineage($fields)"
     val allNewCaseClasses = fieldResponses.flatMap(_.requiredCaseClasses).toSet
     allNewCaseClasses + thisCaseClass
+
+  private def attachLineage(fieldName: String): String =
+    if lineage.isEmpty then fieldName
+    else s"$lineage${classNameFromColumnName(fieldName)}"
 
   private def convertToScalaType(
       field: StructField
   ): GeneratedType =
-    val fieldName = scalaTypeNameFromDataType(field.dataType, field.name)
+    val typeName = scalaTypeNameFromDataType(field.dataType, attachLineage(field.name))
     val withOption =
-      if field.nullable then s"Option[$fieldName]" else fieldName
+      if field.nullable then s"Option[$typeName]" else typeName
 
     field.dataType match
+      case ArrayType(elementType, nullable) =>
+      case MapType(keyType, valType, nullableValue) =>
       case t: StructType =>
-        val caseClassReqs = if !existingCaseClasses.contains(fieldName) then
-          val nestedGenerator = SchemaConverter(fieldName, existingCaseClasses)
-          val generatedCaseClassStrings = nestedGenerator.generate(fieldName, t)
+        val caseClassReqs =
+          val nestedGenerator = SchemaConverter(typeName, existingCaseClasses)
+          val generatedCaseClassStrings = nestedGenerator.generate(t)
           existingCaseClasses ++ generatedCaseClassStrings
-        else existingCaseClasses
+
         GeneratedType(field.name, withOption, caseClassReqs)
 
       case _             => GeneratedType(field.name, withOption, existingCaseClasses)
@@ -50,7 +56,6 @@ case class SchemaConverter(lineage: String = "", existingCaseClasses: Set[CaseCl
         val valTypeStr = scalaTypeNameFromDataType(valType, fieldName)
         s"scala.collection.Map[$keyTypeStr, $valTypeStr]"
       case t: StructType =>
-        val fieldNameWithLineage =
-          s"$lineage$$${classNameFromColumnName(fieldName)}"
+        val fieldNameWithLineage = attachLineage(fieldName)
         classNameFromColumnName(fieldName)
       case _ => "String"

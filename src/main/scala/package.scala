@@ -1,7 +1,6 @@
 def classNameFromColumnName(columnName: String): String =
   val parts = columnName.split("_")
-  val name = parts.map(_.capitalize).mkString
-  s"Gen$name"
+  parts.map(_.capitalize).mkString
 
 val sep: String = sys.props("line.separator")
 
